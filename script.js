@@ -1,4 +1,5 @@
-const STORAGE_KEY = "shopping-list-items";
+const supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY);
+const TABLE = "shopping_items";
 
 const form = document.getElementById("add-form");
 const input = document.getElementById("item-input");
@@ -7,19 +8,19 @@ const emptyMessage = document.getElementById("empty-message");
 const summaryText = document.getElementById("summary-text");
 const clearCheckedBtn = document.getElementById("clear-checked-btn");
 
-let items = loadItems();
+let items = [];
 
-function loadItems() {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    return raw ? JSON.parse(raw) : [];
-  } catch {
+async function loadItems() {
+  const { data, error } = await supabaseClient
+    .from(TABLE)
+    .select("*")
+    .order("created_at", { ascending: true });
+
+  if (error) {
+    console.error("Failed to load items:", error);
     return [];
   }
-}
-
-function saveItems() {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(items));
+  return data;
 }
 
 function render() {
@@ -57,30 +58,61 @@ function render() {
   clearCheckedBtn.hidden = checkedCount === 0;
 }
 
-function addItem(name) {
-  items.push({ id: crypto.randomUUID(), name, checked: false });
-  saveItems();
-  render();
-}
+async function addItem(name) {
+  const { data, error } = await supabaseClient
+    .from(TABLE)
+    .insert({ name, checked: false })
+    .select()
+    .single();
 
-function toggleItem(id) {
-  const item = items.find((i) => i.id === id);
-  if (item) {
-    item.checked = !item.checked;
-    saveItems();
-    render();
+  if (error) {
+    console.error("Failed to add item:", error);
+    return;
   }
-}
-
-function deleteItem(id) {
-  items = items.filter((i) => i.id !== id);
-  saveItems();
+  items.push(data);
   render();
 }
 
-function clearChecked() {
+async function toggleItem(id) {
+  const item = items.find((i) => i.id === id);
+  if (!item) return;
+
+  const nextChecked = !item.checked;
+  const { error } = await supabaseClient
+    .from(TABLE)
+    .update({ checked: nextChecked })
+    .eq("id", id);
+
+  if (error) {
+    console.error("Failed to update item:", error);
+    return;
+  }
+  item.checked = nextChecked;
+  render();
+}
+
+async function deleteItem(id) {
+  const { error } = await supabaseClient.from(TABLE).delete().eq("id", id);
+
+  if (error) {
+    console.error("Failed to delete item:", error);
+    return;
+  }
+  items = items.filter((i) => i.id !== id);
+  render();
+}
+
+async function clearChecked() {
+  const checkedIds = items.filter((i) => i.checked).map((i) => i.id);
+  if (checkedIds.length === 0) return;
+
+  const { error } = await supabaseClient.from(TABLE).delete().in("id", checkedIds);
+
+  if (error) {
+    console.error("Failed to clear checked items:", error);
+    return;
+  }
   items = items.filter((i) => !i.checked);
-  saveItems();
   render();
 }
 
@@ -95,4 +127,7 @@ form.addEventListener("submit", (e) => {
 
 clearCheckedBtn.addEventListener("click", clearChecked);
 
-render();
+(async function init() {
+  items = await loadItems();
+  render();
+})();
